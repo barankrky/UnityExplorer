@@ -29,7 +29,7 @@ namespace UnityExplorer.MCP.Runtime
         {
             if (executor == null) throw new ArgumentNullException("executor");
             this.executor = executor;
-            tools = BuildTools();
+            tools = BuildTools(executor.Options);
             requiredArguments = BuildRequiredArguments();
         }
 
@@ -199,15 +199,20 @@ namespace UnityExplorer.MCP.Runtime
             return map;
         }
 
-        private static McpJsonValue BuildTools()
+        private static McpJsonValue BuildTools(McpGameExecutorOptions options)
         {
+            // Advertise the limits the executor actually enforces. Hardcoding wider bounds made
+            // the schema promise ranges that were silently clamped at runtime.
+            int maxResults = options.MaximumSearchResults;
+            int maxDepth = options.MaximumSnapshotDepth;
+            int maxItems = options.MaximumSerializedItems;
             McpJsonValue result = McpJsonValue.Array();
             AddTool(result, "get_status", "Get UnityExplorer bridge status", "Check whether the game-side bridge is alive and return game, Unity, scene, and capability metadata.", Schema(), true, false, true);
             AddTool(result, "list_scenes", "List Unity scenes", "List loaded Unity scenes.", Schema(Prop("include_unloaded", Boolean()), Prop("include_special", Boolean())), true, false, true);
-            AddTool(result, "search_objects", "Search game objects", "Search Unity objects and return stable handles for later calls.", Schema(Prop("query", String()), Prop("scene", String()), Prop("type", String()), Prop("kind", String()), Prop("include_inactive", Boolean()), Prop("exact", Boolean()), Prop("limit", Integer(1, 1000))), true, false, true);
-            AddTool(result, "get_object", "Inspect an object", "Read an object summary, hierarchy, components, and members.", SchemaRequired(new[] { "object_id" }, Prop("object_id", Id()), Prop("depth", Integer(0, 5)), Prop("include_members", Boolean()), Prop("include_methods", Boolean()), Prop("member_filter", String()), Prop("max_collection_items", Integer(0, 1000))), true, false, true);
-            AddTool(result, "get_member", "Read an object member", "Read one field, property, or nested member path.", SchemaRequired(new[] { "object_id", "member_path" }, Prop("object_id", Id()), Prop("member_path", String()), Prop("depth", Integer(0, 5)), Prop("max_items", Integer(1, 1000))), true, false, true);
-            AddTool(result, "list_methods", "List callable methods", "List callable instance/static methods and signatures.", SchemaRequired(new[] { "object_id" }, Prop("object_id", Id()), Prop("name_filter", String()), Prop("include_non_public", Boolean()), Prop("include_inherited", Boolean()), Prop("include_static", Boolean()), Prop("limit", Integer(1, 1000))), true, false, true);
+            AddTool(result, "search_objects", "Search game objects", "Search Unity objects and return stable handles for later calls.", Schema(Prop("query", String()), Prop("scene", String()), Prop("type", String()), Prop("kind", String()), Prop("include_inactive", Boolean()), Prop("exact", Boolean()), Prop("limit", Integer(1, maxResults))), true, false, true);
+            AddTool(result, "get_object", "Inspect an object", "Read an object summary, hierarchy, components, and members.", SchemaRequired(new[] { "object_id" }, Prop("object_id", Id()), Prop("depth", Integer(0, maxDepth)), Prop("include_members", Boolean()), Prop("include_methods", Boolean()), Prop("member_filter", String()), Prop("max_collection_items", Integer(1, maxItems))), true, false, true);
+            AddTool(result, "get_member", "Read an object member", "Read one field, property, or nested member path.", SchemaRequired(new[] { "object_id", "member_path" }, Prop("object_id", Id()), Prop("member_path", String()), Prop("depth", Integer(0, maxDepth)), Prop("max_items", Integer(1, maxItems))), true, false, true);
+            AddTool(result, "list_methods", "List callable methods", "List callable instance/static methods and signatures.", SchemaRequired(new[] { "object_id" }, Prop("object_id", Id()), Prop("name_filter", String()), Prop("include_non_public", Boolean()), Prop("include_inherited", Boolean()), Prop("include_static", Boolean()), Prop("limit", Integer(1, maxItems))), true, false, true);
             AddTool(result, "set_member", "Set an object member", "Set a field/property or nested member path.", SchemaRequired(new[] { "object_id", "member_path", "value" }, Prop("object_id", Id()), Prop("member_path", String()), Prop("value", McpJsonValue.Object()), Prop("value_type", String())), false, true, false);
             AddTool(result, "set_transform", "Set object transform", "Set world/local Transform values or change an object's parent.", SchemaRequired(new[] { "object_id" }, Prop("object_id", Id()), Prop("position", Vector3()), Prop("local_position", Vector3()), Prop("rotation", Quaternion()), Prop("local_rotation", Quaternion()), Prop("euler_angles", Vector3()), Prop("local_euler_angles", Vector3()), Prop("local_scale", Vector3()), Prop("parent_id", Id()), Prop("world_position_stays", Boolean())), false, true, true);
             AddTool(result, "set_enabled", "Set object enabled state", "Enable or disable a GameObject, Behaviour, or writable enabled member.", SchemaRequired(new[] { "object_id", "enabled" }, Prop("object_id", Id()), Prop("enabled", Boolean())), false, true, true);

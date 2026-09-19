@@ -101,8 +101,15 @@ namespace UnityExplorer.MCP.Runtime
             if (!TryGet(key, out item) || item.Kind != JsonKind.Number)
                 return defaultValue;
             double number = item.NumberValue;
-            if (double.IsNaN(number) || double.IsInfinity(number) || number < minimum || number > maximum)
+            if (double.IsNaN(number) || double.IsInfinity(number))
                 return defaultValue;
+            // Clamp a supplied value that is outside the accepted range instead of falling
+            // back to the default. Returning the default made larger requests silently return
+            // fewer results than smaller ones: a limit above the cap dropped to the default,
+            // so asking for more than MaximumSearchResults returned fewer than asking for the
+            // maximum. Out-of-range input still never exceeds the configured ceiling.
+            if (number < minimum) return minimum;
+            if (number > maximum) return maximum;
             return (int)number;
         }
 

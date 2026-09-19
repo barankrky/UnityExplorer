@@ -233,6 +233,11 @@ namespace UnityExplorer.MCP.Runtime
             CopyAlias(copy, "stop_on_error", "stopOnError"); CopyAlias(copy, "max_depth", "depth");
             CopyAlias(copy, "max_items", "maxItems"); CopyAlias(copy, "exact_name", "exactName");
             CopyAlias(copy, "include_explorer", "includeExplorer"); CopyAlias(copy, "parent_id", "parentId");
+            // The get_object schema advertises snake_case names; accept them as aliases of the
+            // canonical camelCase keys so callers following the schema are not silently ignored.
+            CopyAlias(copy, "include_members", "includeMembers"); CopyAlias(copy, "include_methods", "includeMethods");
+            CopyAlias(copy, "member_filter", "memberFilter"); CopyAlias(copy, "max_collection_items", "maxItems");
+            CopyAlias(copy, "max_items", "maxItems");
             CopyAlias(copy, "world_position_stays", "worldPositionStays");
             CopyAlias(copy, "local_position", "localPosition"); CopyAlias(copy, "local_rotation", "localRotation");
             CopyAlias(copy, "euler_angles", "eulerAngles"); CopyAlias(copy, "local_euler_angles", "localEulerAngles");

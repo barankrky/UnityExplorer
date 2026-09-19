@@ -34,10 +34,17 @@ namespace UnityExplorer.MCP.Runtime
             for (int i = 0; i < objects.Length && matches.ArrayValue.Count < limit; i++)
             {
                 UnityEngine.Object obj = objects[i]; if (obj == null || !Matches(obj.name, name, exact)) continue;
-                GameObject go = obj as GameObject; Component component = obj as Component; if (go == null && component != null) go = component.gameObject;
+                // `as GameObject` is a plain CLR cast and fails for IL2CPP objects whose managed
+                // wrapper is not exactly GameObject, which left `go` null and skipped every
+                // filter below (letting UnityExplorer's own UI objects through). TryCast performs
+                // the native interop cast, matching SearchProvider's behaviour.
+                GameObject go = null; Component component = null;
+                Type actualType = McpReflection.GetActualType(obj);
+                if (actualType == typeof(GameObject)) go = obj.TryCast<GameObject>();
+                else if (typeof(Component).IsAssignableFrom(actualType)) { component = obj.TryCast<Component>(); if (component != null) go = component.gameObject; }
                 if (go != null)
                 {
-                    if (!includeExplorer && go.transform.root != null && go.transform.root.name == "UniverseLibCanvas") continue;
+                    if (!includeExplorer && McpReflection.IsExplorerObject(go)) continue;
                     if (!string.IsNullOrEmpty(sceneName) && !string.Equals(go.scene.name, sceneName, StringComparison.OrdinalIgnoreCase) && go.scene.GetSceneIntHandle().ToString() != sceneName) continue;
                     string objectPath = McpReflection.GetGameObjectPath(go); if (!string.IsNullOrEmpty(path) && objectPath.IndexOf(path, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 }
@@ -48,16 +55,49 @@ namespace UnityExplorer.MCP.Runtime
 
         private McpJsonValue Snapshot(McpJsonValue command)
         {
-            object target = registry.Resolve(RequiredString(command, "objectId"));
+            string objectId = RequiredString(command, "objectId");
+            object target = registry.Resolve(objectId);
             int depth = command.GetInt32("depth", 2, 0, options.MaximumSnapshotDepth), maxItems = command.GetInt32("maxItems", options.MaximumSerializedItems, 1, options.MaximumSerializedItems);
-            return codec.Serialize(target, depth, maxItems);
+            McpJsonValue result = codec.Serialize(target, depth, maxItems);
+            if (result != null && result.Kind == McpJsonValue.JsonKind.Object)
+            {
+                // These options are part of the get_object contract; honour them rather than
+                // returning the same payload regardless of what the caller asked for.
+                bool includeMembers = command.GetBoolean("includeMembers", true);
+                if (!includeMembers) result.ObjectValue.Remove("members");
+                else FilterMembers(result, command.GetString("memberFilter", null));
+                if (command.GetBoolean("includeMethods", false))
+                {
+                    // Reuse the list_methods path so the two surfaces cannot drift apart.
+                    McpJsonValue listing = McpJsonValue.Object();
+                    listing.ObjectValue["objectId"] = McpJsonValue.From(objectId);
+                    listing.ObjectValue["limit"] = McpJsonValue.From((double)options.MaximumMembersPerObject);
+                    McpJsonValue methods;
+                    if (ListMethods(listing).TryGet("methods", out methods)) result.ObjectValue["methods"] = methods;
+                }
+            }
+            return result;
+        }
+
+        private static void FilterMembers(McpJsonValue snapshot, string filter)
+        {
+            if (string.IsNullOrEmpty(filter)) return;
+            McpJsonValue members;
+            if (!snapshot.TryGet("members", out members) || members == null || members.Kind != McpJsonValue.JsonKind.Object) return;
+            List<string> discarded = new List<string>();
+            foreach (KeyValuePair<string, McpJsonValue> pair in members.ObjectValue)
+                if (pair.Key.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) discarded.Add(pair.Key);
+            for (int i = 0; i < discarded.Count; i++) members.ObjectValue.Remove(discarded[i]);
         }
 
         private McpJsonValue GetMember(McpJsonValue command)
         {
             object target; Type type; ResolveTarget(command, out target, out type);
-            object value = McpMemberPath.Read(target, type, RequiredString(command, "member"), options.IncludeNonPublicMembers);
-            return codec.Serialize(value, command.GetInt32("depth", 2, 0, options.MaximumSnapshotDepth), options.MaximumSerializedItems);
+            // Pass the path through unresolved so an empty or missing path is reported as
+            // invalid_member_path, consistent with a malformed one, instead of the generic
+            // invalid_command that RequiredString produced.
+            object value = McpMemberPath.Read(target, type, command.GetString("member", null), options.IncludeNonPublicMembers);
+            return codec.Serialize(value, command.GetInt32("depth", 2, 0, options.MaximumSnapshotDepth), command.GetInt32("maxItems", options.MaximumSerializedItems, 1, options.MaximumSerializedItems));
         }
 
         private McpJsonValue ObjectSummary(UnityEngine.Object obj, GameObject go)

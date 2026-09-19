@@ -176,8 +176,14 @@ namespace UnityExplorer.MCP.Runtime
         {
             McpJsonValue members = McpJsonValue.Object();
             int count = 0;
+            // Two members can differ only by case, such as a property and its backing field,
+            // or a field named Method beside a property named method. Emitting both produces a
+            // JSON object with keys that differ only in casing, which strict parsers reject
+            // (PowerShell ConvertFrom-Json throws). Keep the first name and skip the rest.
+            HashSet<string> emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (MemberInfo member in McpReflection.GetReadableMembers(type, options.IncludeNonPublicMembers))
             {
+                if (!emitted.Add(member.Name)) continue;
                 if (count++ >= options.MaximumMembersPerObject || state.Remaining-- <= 0) { members.ObjectValue["$truncated"] = McpJsonValue.From(true); break; }
                 try { members.ObjectValue[member.Name] = SerializeValue(McpReflection.GetMemberValue(member, value), depth, state); }
                 catch (Exception ex) { members.ObjectValue[member.Name] = ErrorValue(ex); }
@@ -301,6 +307,9 @@ namespace UnityExplorer.MCP.Runtime
 
     internal static class McpReflection
     {
+        // UniverseLib names its root canvas this, and UnityExplorer's panels are parented under it.
+        private const string ExplorerCanvasName = "UniverseLibCanvas";
+
         internal static Type GetActualType(object value)
         {
             if (value == null) return null;
@@ -551,6 +560,28 @@ namespace UnityExplorer.MCP.Runtime
                 parent = parent.parent;
             }
             return path;
+        }
+
+        /// <summary>
+        /// True when the object belongs to UnityExplorer's or UniverseLib's own UI hierarchy.
+        /// </summary>
+        internal static bool IsExplorerObject(GameObject go)
+        {
+            if (go == null) return false;
+            try
+            {
+                // UnityExplorer's UI lives under the UniverseLib canvas. Walk the ancestors
+                // rather than reading transform.root, which is unreliable for IL2CPP wrappers.
+                Transform current = go.transform;
+                int guard = 0;
+                while (current != null && guard++ < 256)
+                {
+                    if (string.Equals(current.name, ExplorerCanvasName, StringComparison.Ordinal)) return true;
+                    current = current.parent;
+                }
+                return false;
+            }
+            catch { return false; }
         }
 
         internal static bool IsUnsafeMember(MemberInfo member)
