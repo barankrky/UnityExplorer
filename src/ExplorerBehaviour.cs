@@ -1,4 +1,5 @@
-﻿using UnityExplorer.UI;
+﻿using UnityExplorer.MCP;
+using UnityExplorer.UI;
 #if CPP
 #if UNHOLLOWER
 using UnhollowerRuntimeLib;
@@ -32,6 +33,7 @@ public class ExplorerBehaviour : MonoBehaviour
     internal void Update()
     {
         ExplorerCore.Update();
+        McpManager.PumpMainThread();
     }
 
     // For editor, to clean up objects
@@ -47,6 +49,9 @@ public class ExplorerBehaviour : MonoBehaviour
     {
         if (quitting) return;
         quitting = true;
+
+        McpManager.Shutdown();
+
         if (UIManager.UIRoot)
             TryDestroy(UIManager.UIRoot.transform.root.gameObject);
 

@@ -22,7 +22,8 @@ namespace UnityExplorer.UI
             UIInspectorResults,
             HookManager,
             Clipboard,
-            Freecam
+            Freecam,
+            Mcp
         }
 
         public enum VerticalAnchor
@@ -44,7 +45,10 @@ namespace UnityExplorer.UI
 
         public static RectTransform NavBarRect;
         public static GameObject NavbarTabButtonHolder;
-        private static readonly Vector2 NAVBAR_DIMENSIONS = new(1020f, 35f);
+        // Reserve one standard tab width plus spacing for the built-in MCP panel.
+        // Without this, the fixed-width navbar compresses/overlaps tab content and the
+        // gaps between some buttons appear to disappear.
+        private static readonly Vector2 NAVBAR_DIMENSIONS = new(1105f, 35f);
 
         private static ButtonRef closeBtn;
 
@@ -91,6 +95,7 @@ namespace UnityExplorer.UI
             UIPanels.Add(Panels.Freecam, new FreeCamPanel(UiBase));
             UIPanels.Add(Panels.Clipboard, new ClipboardPanel(UiBase));
             UIPanels.Add(Panels.ConsoleLog, new LogPanel(UiBase));
+            UIPanels.Add(Panels.Mcp, new McpPanel(UiBase));
             UIPanels.Add(Panels.Options, new OptionsPanel(UiBase));
             UIPanels.Add(Panels.UIInspectorResults, new MouseInspectorResultsPanel(UiBase));
 

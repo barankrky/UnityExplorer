@@ -9,6 +9,7 @@ global using UniverseLib;
 global using UniverseLib.Utility;
 
 using UnityExplorer.Config;
+using UnityExplorer.MCP;
 using UnityExplorer.ObjectExplorer;
 using UnityExplorer.Runtime;
 using UnityExplorer.UI;
@@ -67,6 +68,7 @@ public static class ExplorerCore
     static void LateInit()
     {
         SceneHandler.Init();
+        McpManager.Initialize();
 
         Log($"Creating UI...");
 

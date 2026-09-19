@@ -1,4 +1,5 @@
-﻿using UnityExplorer.UI;
+﻿using UnityExplorer.MCP.Transport;
+using UnityExplorer.UI;
 
 namespace UnityExplorer.Config
 {
@@ -36,6 +37,23 @@ namespace UnityExplorer.Config
         public static ConfigElement<KeyCode> LOCK_TIME_SCALE_TO_NORMAL;
         public static ConfigElement<KeyCode> LOCK_TIME_SCALE_TO_HALF;
         public static ConfigElement<KeyCode> LOCK_TIME_SCALE_TO_DOUBLE;
+
+        // MCP server settings
+        public static ConfigElement<bool> MCP_Enabled;
+        public static ConfigElement<McpTransportMode> MCP_Transport_Mode;
+        public static ConfigElement<string> MCP_Bind_Address;
+        public static ConfigElement<int> MCP_Port;
+        public static ConfigElement<string> MCP_Rpc_Path;
+        public static ConfigElement<string> MCP_Health_Path;
+        public static ConfigElement<string> MCP_Auth_Token;
+        public static ConfigElement<bool> MCP_Require_Token_For_Health;
+        public static ConfigElement<bool> MCP_Read_Only;
+        public static ConfigElement<bool> MCP_Allow_Dangerous_Operations;
+        public static ConfigElement<bool> MCP_Request_Logging;
+        public static ConfigElement<int> MCP_Request_Timeout_Milliseconds;
+        public static ConfigElement<int> MCP_Max_Request_Body_Bytes;
+        public static ConfigElement<int> MCP_Max_Pending_Requests;
+        public static ConfigElement<int> MCP_Max_Requests_Per_Frame;
 
         // internal configs
         internal static InternalConfigHandler InternalHandler { get; private set; }
@@ -177,6 +195,66 @@ namespace UnityExplorer.Config
             LOCK_TIME_SCALE_TO_DOUBLE = new("Speed-Up Keybind",
                 "Shortcut key for setting TimeScale to double",
                 KeyCode.None);
+
+            MCP_Enabled = new("MCP Enabled",
+                "Start the local MCP server after UnityExplorer finishes initializing.",
+                false);
+
+            MCP_Transport_Mode = new("MCP Transport Mode",
+                "MCP protocol transport hosted directly by the UnityExplorer DLL. Supported values are SSE and StreamableHTTP. Restart MCP after changing this value.",
+                McpTransportMode.SSE);
+
+            MCP_Bind_Address = new("MCP Bind Address",
+                "Address exposed by the MCP transport. The built-in transport currently supports loopback only.",
+                "127.0.0.1");
+
+            MCP_Port = new("MCP Port",
+                "TCP port used by the local MCP HTTP bridge. Restart MCP after changing this value.",
+                17891);
+
+            MCP_Rpc_Path = new("MCP RPC Path",
+                "HTTP path used for JSON-RPC requests. Restart MCP after changing this value.",
+                "/mcp");
+
+            MCP_Health_Path = new("MCP Health Path",
+                "HTTP path used for MCP health checks. Restart MCP after changing this value.",
+                "/health");
+
+            MCP_Auth_Token = new("MCP Auth Token",
+                "Bearer token required by the MCP HTTP bridge. A secure token is generated automatically when MCP starts if this value is empty.",
+                "");
+
+            MCP_Require_Token_For_Health = new("MCP Require Token For Health",
+                "Require the configured MCP bearer token for health-check requests.",
+                false);
+
+            MCP_Read_Only = new("MCP Read Only",
+                "Block mutation tools and permit inspection-only MCP operations.",
+                true);
+
+            MCP_Allow_Dangerous_Operations = new("MCP Allow Dangerous Operations",
+                "Allow high-risk tools such as object destruction, arbitrary invocation, and scene changes. Reset to false on every startup.",
+                false);
+
+            MCP_Request_Logging = new("MCP Request Logging",
+                "Retain a small in-memory log of MCP requests for the MCP UI.",
+                false);
+
+            MCP_Request_Timeout_Milliseconds = new("MCP Request Timeout Milliseconds",
+                "Maximum time an HTTP request waits for Unity main-thread execution.",
+                30000);
+
+            MCP_Max_Request_Body_Bytes = new("MCP Max Request Body Bytes",
+                "Maximum accepted JSON-RPC request body size.",
+                1024 * 1024);
+
+            MCP_Max_Pending_Requests = new("MCP Max Pending Requests",
+                "Maximum number of requests waiting for Unity main-thread execution.",
+                128);
+
+            MCP_Max_Requests_Per_Frame = new("MCP Max Requests Per Frame",
+                "Maximum number of queued MCP requests executed during one Unity Update.",
+                16);
         }
     }
 }
