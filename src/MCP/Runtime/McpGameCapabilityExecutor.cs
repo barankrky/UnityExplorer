@@ -257,6 +257,8 @@ namespace UnityExplorer.MCP.Runtime
             CopyAlias(copy, "include_members", "includeMembers"); CopyAlias(copy, "include_methods", "includeMethods");
             CopyAlias(copy, "member_filter", "memberFilter"); CopyAlias(copy, "max_collection_items", "maxItems");
             CopyAlias(copy, "max_items", "maxItems");
+            CopyAlias(copy, "include_inactive", "includeInactive"); CopyAlias(copy, "kind", "kind");
+            CopyAlias(copy, "include_unloaded", "includeUnloaded"); CopyAlias(copy, "include_special", "includeSpecial");
             CopyAlias(copy, "world_position_stays", "worldPositionStays");
             CopyAlias(copy, "local_position", "localPosition"); CopyAlias(copy, "local_rotation", "localRotation");
             CopyAlias(copy, "euler_angles", "eulerAngles"); CopyAlias(copy, "local_euler_angles", "localEulerAngles");
