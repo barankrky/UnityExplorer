@@ -46,7 +46,7 @@ public static class SceneHandler
     internal static int DefaultSceneCount => 1 + (DontDestroyExists ? 1 : 0);
 
     /// <summary>Whether or not we are currently inspecting the "HideAndDontSave" asset scene.</summary>
-    public static bool InspectingAssetScene => SelectedScene.HasValue && SelectedScene.Value.handle == -1;
+    public static bool InspectingAssetScene => SelectedScene.HasValue && SelectedScene.Value.GetSceneIntHandle() == -1;
 
     /// <summary>Whether or not we successfuly retrieved the names of the scenes in the build settings.</summary>
     public static bool WasAbleToGetScenesInBuild { get; private set; }
@@ -61,13 +61,7 @@ public static class SceneHandler
         // Check if the game has "DontDestroyOnLoad"
         try
         {
-            Type? sceneType = ReflectionUtility.GetTypeByName("UnityEngine.SceneManagement.Scene");
-            if (sceneType == null)
-            {
-                throw new Exception("This version of Unity does not ship with the 'Scene' class, or it was not unstripped.");
-            }
-            MethodInfo? method = sceneType.GetMethod("GetNameInternal", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-            string? sceneName = (string?)method?.Invoke(null, [-12]);
+            string? sceneName = UnityHelpers.GetSceneNameByIntHandle(-12);
             if (string.IsNullOrEmpty(sceneName))
             {
                 throw new Exception("Scene.GetNameInternal returned null for DontDestroyOnLoad scene.");
@@ -77,11 +71,19 @@ public static class SceneHandler
         catch (Exception ex)
         {
             ExplorerCore.LogWarning($"Unable to check for existence of DontDestroyOnLoad scene via Scene.GetNameInternal: {ex}");
+
+            try
+            {
 #pragma warning disable CS0618 // 型またはメンバーが旧型式です
-            ExplorerCore.LogWarning("Falling back to checking loaded scenes for DontDestroyOnLoad via SceneManager.GetAllScenes(). This uses a deprecated API.");
-            // 非推奨APIだけど、6年近くたってもまだ使われてるので仕方なく使う
-            DontDestroyExists = SceneManager.GetAllScenes().Any(s => s.name == dontDestroyName);
+                ExplorerCore.LogWarning("Falling back to checking loaded scenes for DontDestroyOnLoad via SceneManager.GetAllScenes(). This uses a deprecated API.");
+                DontDestroyExists = SceneManager.GetAllScenes().Any(s => s.name == dontDestroyName);
 #pragma warning restore CS0618 // 型またはメンバーが旧型式です
+            }
+            catch (Exception fallbackEx)
+            {
+                DontDestroyExists = false;
+                ExplorerCore.LogWarning($"Fallback check via SceneManager.GetAllScenes() also failed: {fallbackEx}");
+            }
         }
 
         // Try to get all scenes in the build settings. This may not work.
@@ -119,8 +121,8 @@ public static class SceneHandler
         // Inspected scene will exist if it's DontDestroyOnLoad or HideAndDontSave
         bool inspectedExists =
             SelectedScene.HasValue
-            && ((DontDestroyExists && SelectedScene.Value.handle == -12)
-                || SelectedScene.Value.handle == -1);
+            && ((DontDestroyExists && SelectedScene.Value.GetSceneIntHandle() == -12)
+                || SelectedScene.Value.GetSceneIntHandle() == -1);
 
         LoadedScenes.Clear();
 
@@ -143,9 +145,9 @@ public static class SceneHandler
 
         if (DontDestroyExists)
         {
-            LoadedScenes.Add(new Scene { m_Handle = -12 });
+            LoadedScenes.Add(UnityHelpers.CreateSceneFromIntHandle(-12));
         }
-        LoadedScenes.Add(new Scene { m_Handle = -1 });
+        LoadedScenes.Add(UnityHelpers.CreateSceneFromIntHandle(-1));
 
         // Default to first scene if none selected or previous selection no longer exists.
         if (!inspectedExists)
