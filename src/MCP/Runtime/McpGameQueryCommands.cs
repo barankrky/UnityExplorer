@@ -55,19 +55,24 @@ namespace UnityExplorer.MCP.Runtime
 
         private McpJsonValue Snapshot(McpJsonValue command)
         {
-            string objectId = RequiredString(command, "objectId");
-            object target = registry.Resolve(objectId);
-            // include_static mirrors the Inspector's All/Instance/Static scope control.
+            // Accept either an instance or a type. A type-only call inspects statics, matching the
+            // Inspector's [S] tab, and is the only way to read a class without an instance.
+            object target; Type type; ResolveTarget(command, out target, out type);
+            string objectId = command.GetString("objectId", null);
+            // include_static mirrors the Inspector's All/Instance/Static scope control. A type-only
+            // request has no instance to read from, so statics must be included for it to return
+            // anything at all.
+            bool includeStatic = command.GetBoolean("includeStatic", options.IncludeStaticMembers || target == null);
             McpGameExecutorOptions effective = options;
-            if (command.GetBoolean("includeStatic", options.IncludeStaticMembers) != options.IncludeStaticMembers)
+            if (includeStatic != options.IncludeStaticMembers)
             {
                 effective = options.Clone();
-                effective.IncludeStaticMembers = command.GetBoolean("includeStatic", options.IncludeStaticMembers);
+                effective.IncludeStaticMembers = includeStatic;
             }
             int depth = command.GetInt32("depth", 2, 0, effective.MaximumSnapshotDepth), maxItems = command.GetInt32("maxItems", effective.MaximumSerializedItems, 1, effective.MaximumSerializedItems);
             // The filter is applied during serialization, before the per-object member cap, so it
             // can select members that alphabetical truncation would otherwise discard.
-            McpJsonValue result = new McpValueCodec(registry, effective).Serialize(target, depth, maxItems, command.GetString("memberFilter", null));
+            McpJsonValue result = new McpValueCodec(registry, effective).Serialize(target, type, depth, maxItems, command.GetString("memberFilter", null));
             if (result != null && result.Kind == McpJsonValue.JsonKind.Object)
             {
                 // These options are part of the get_object contract; honour them rather than
@@ -78,8 +83,9 @@ namespace UnityExplorer.MCP.Runtime
                 {
                     // Reuse the list_methods path so the two surfaces cannot drift apart.
                     McpJsonValue listing = McpJsonValue.Object();
-                    listing.ObjectValue["objectId"] = McpJsonValue.From(objectId);
-                    listing.ObjectValue["limit"] = McpJsonValue.From((double)options.MaximumMembersPerObject);
+                    if (!string.IsNullOrEmpty(objectId)) listing.ObjectValue["objectId"] = McpJsonValue.From(objectId);
+                    else listing.ObjectValue["type"] = McpJsonValue.From(type.FullName);
+                    listing.ObjectValue["limit"] = McpJsonValue.From((double)effective.MaximumMembersPerObject);
                     McpJsonValue methods;
                     if (ListMethods(listing).TryGet("methods", out methods)) result.ObjectValue["methods"] = methods;
                 }

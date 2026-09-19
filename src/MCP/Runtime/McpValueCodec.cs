@@ -20,10 +20,20 @@ namespace UnityExplorer.MCP.Runtime
 
         internal McpJsonValue Serialize(object value, int requestedDepth, int requestedItems)
         {
-            return Serialize(value, requestedDepth, requestedItems, null);
+            return Serialize(value, value == null ? null : McpReflection.GetActualType(value), requestedDepth, requestedItems, null);
         }
 
         internal McpJsonValue Serialize(object value, int requestedDepth, int requestedItems, string memberFilter)
+        {
+            return Serialize(value, value == null ? null : McpReflection.GetActualType(value), requestedDepth, requestedItems, memberFilter);
+        }
+
+        /// <summary>
+        /// Serialize an instance, or a type when <paramref name="value"/> is null. A null value
+        /// with a type inspects statics, which is how the Inspector's [S] tab reads a class that
+        /// has no instance.
+        /// </summary>
+        internal McpJsonValue Serialize(object value, Type declaredType, int requestedDepth, int requestedItems, string memberFilter)
         {
             int depth = Clamp(requestedDepth, 0, options.MaximumSnapshotDepth);
             int items = Clamp(requestedItems, 1, options.MaximumSerializedItems);
@@ -31,7 +41,17 @@ namespace UnityExplorer.MCP.Runtime
             // Record which object the filter belongs to. The filter describes the inspected
             // object's own members, so it must not be applied to nested objects as well.
             state.MemberFilter = string.IsNullOrEmpty(memberFilter) ? null : memberFilter;
-            state.MemberFilterTarget = state.MemberFilter == null ? null : value;
+            state.MemberFilterTarget = state.MemberFilter == null ? null : (object)value;
+            if (value == null)
+            {
+                Type type = declaredType;
+                if (type == null) return McpJsonValue.Null();
+                McpJsonValue result = McpJsonValue.Object();
+                result.ObjectValue["type"] = McpJsonValue.From(TypeName(type));
+                result.ObjectValue["static"] = McpJsonValue.From(true);
+                AddMembers(result, null, type, depth - 1, state);
+                return result;
+            }
             return SerializeValue(value, depth, state);
         }
 
@@ -207,6 +227,8 @@ namespace UnityExplorer.MCP.Runtime
                 // still come back empty for a member that exists, because the member had already
                 // been dropped by MaximumMembersPerObject.
                 if (filterThisObject && member.Name.IndexOf(state.MemberFilter, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                // A static view has no instance, so only static members are readable.
+                if (value == null && !McpReflection.IsStaticMember(member)) continue;
                 // Two members can differ only by case, such as a property and its backing field,
                 // or a field named Method beside a property named method. Emitting both produces
                 // a JSON object with keys that differ only in casing, which strict parsers reject
@@ -227,7 +249,15 @@ namespace UnityExplorer.MCP.Runtime
                 }
                 emittedCount++;
                 state.Remaining--;
-                try { members.ObjectValue[member.Name] = SerializeValue(McpReflection.GetMemberValue(member, value), depth, state); }
+                try
+                {
+                    // A null instance means a static view: only static members can be read, and
+                    // GetMemberValue must be handed null rather than a live object.
+                    object memberValue = value == null
+                        ? (McpReflection.IsStaticMember(member) ? McpReflection.GetMemberValue(member, null) : null)
+                        : McpReflection.GetMemberValue(member, value);
+                    members.ObjectValue[member.Name] = SerializeValue(memberValue, depth, state);
+                }
                 catch (Exception ex) { members.ObjectValue[member.Name] = ErrorValue(ex); }
                 info.ObjectValue[member.Name] = DescribeMember(member);
             }

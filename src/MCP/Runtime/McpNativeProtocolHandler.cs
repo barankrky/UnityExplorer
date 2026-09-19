@@ -186,15 +186,17 @@ namespace UnityExplorer.MCP.Runtime
             map["get_status"] = new string[0];
             map["list_scenes"] = new string[0];
             map["search_objects"] = new string[0];
-            map["get_object"] = new[] { "object_id" };
-            map["get_member"] = new[] { "object_id", "member_path" };
-            map["list_methods"] = new[] { "object_id" };
-            map["set_member"] = new[] { "object_id", "member_path", "value" };
+            // These accept either object_id (an instance) or type (a static view, the Inspector's
+            // [S] tab). Requiring object_id made the executor's type-only path unreachable.
+            map["get_object"] = new string[0];
+            map["get_member"] = new[] { "member_path" };
+            map["list_methods"] = new string[0];
+            map["set_member"] = new[] { "member_path", "value" };
             map["set_transform"] = new[] { "object_id" };
             map["set_enabled"] = new[] { "object_id", "enabled" };
             map["create_object"] = new string[0];
             map["destroy_object"] = new[] { "object_id" };
-            map["invoke_method"] = new[] { "object_id", "method" };
+            map["invoke_method"] = new[] { "method" };
             map["execute_batch"] = new[] { "operations" };
             return map;
         }
@@ -210,9 +212,9 @@ namespace UnityExplorer.MCP.Runtime
             AddTool(result, "get_status", "Get UnityExplorer bridge status", "Check whether the game-side bridge is alive and return game, Unity, scene, and capability metadata.", Schema(), true, false, true);
             AddTool(result, "list_scenes", "List Unity scenes", "List loaded Unity scenes.", Schema(Prop("include_unloaded", Boolean()), Prop("include_special", Boolean())), true, false, true);
             AddTool(result, "search_objects", "Search game objects", "Search Unity objects and return stable handles for later calls.", Schema(Prop("query", String()), Prop("scene", String()), Prop("type", String()), Prop("kind", String()), Prop("include_inactive", Boolean()), Prop("exact", Boolean()), Prop("limit", Integer(1, maxResults))), true, false, true);
-            AddTool(result, "get_object", "Inspect an object", "Read an object summary, hierarchy, components, and members. GameObjects include children (with siblingIndex), componentCount/components, parentId and path. memberInfo describes each member (kind, declaredType, declaredBy, static).", SchemaRequired(new[] { "object_id" }, Prop("object_id", Id()), Prop("depth", Integer(0, maxDepth)), Prop("include_members", Boolean()), Prop("include_methods", Boolean()), Prop("include_static", Boolean()), Prop("member_filter", String()), Prop("max_collection_items", Integer(1, maxItems))), true, false, true);
-            AddTool(result, "get_member", "Read an object member", "Read one field, property, or nested member path.", SchemaRequired(new[] { "object_id", "member_path" }, Prop("object_id", Id()), Prop("member_path", String()), Prop("depth", Integer(0, maxDepth)), Prop("max_items", Integer(1, maxItems))), true, false, true);
-            AddTool(result, "list_methods", "List callable methods", "List callable instance/static methods and signatures. Set include_constructors to also list constructors, and include_inherited=false to hide inherited members.", SchemaRequired(new[] { "object_id" }, Prop("object_id", Id()), Prop("name_filter", String()), Prop("include_non_public", Boolean()), Prop("include_inherited", Boolean()), Prop("include_static", Boolean()), Prop("include_constructors", Boolean()), Prop("limit", Integer(1, maxItems))), true, false, true);
+            AddTool(result, "get_object", "Inspect an object", "Read an object summary, hierarchy, components, and members. Pass object_id for an instance, or type alone for a static view of a class (the Inspector's [S] tab). GameObjects include children (with siblingIndex), componentCount/components, parentId and path. memberInfo describes each member (kind, declaredType, declaredBy, static).", Schema(Prop("object_id", Id()), Prop("type", String()), Prop("depth", Integer(0, maxDepth)), Prop("include_members", Boolean()), Prop("include_methods", Boolean()), Prop("include_static", Boolean()), Prop("member_filter", String()), Prop("max_collection_items", Integer(1, maxItems))), true, false, true);
+            AddTool(result, "get_member", "Read an object member", "Read one field, property, or nested member path. Pass object_id for an instance, or type for a static member.", SchemaRequired(new[] { "member_path" }, Prop("object_id", Id()), Prop("type", String()), Prop("member_path", String()), Prop("depth", Integer(0, maxDepth)), Prop("max_items", Integer(1, maxItems))), true, false, true);
+            AddTool(result, "list_methods", "List callable methods", "List callable instance/static methods and signatures. Pass object_id for an instance, or type for statics only. Set include_constructors to also list constructors, and include_inherited=false to hide inherited members.", Schema(Prop("object_id", Id()), Prop("type", String()), Prop("name_filter", String()), Prop("include_non_public", Boolean()), Prop("include_inherited", Boolean()), Prop("include_static", Boolean()), Prop("include_constructors", Boolean()), Prop("limit", Integer(1, maxItems))), true, false, true);
             AddTool(result, "set_member", "Set an object member", "Set a field/property or nested member path.", SchemaRequired(new[] { "object_id", "member_path", "value" }, Prop("object_id", Id()), Prop("member_path", String()), Prop("value", McpJsonValue.Object()), Prop("value_type", String())), false, true, false);
             AddTool(result, "set_transform", "Set object transform", "Set world/local Transform values or change an object's parent.", SchemaRequired(new[] { "object_id" }, Prop("object_id", Id()), Prop("position", Vector3()), Prop("local_position", Vector3()), Prop("rotation", Quaternion()), Prop("local_rotation", Quaternion()), Prop("euler_angles", Vector3()), Prop("local_euler_angles", Vector3()), Prop("local_scale", Vector3()), Prop("parent_id", Id()), Prop("world_position_stays", Boolean())), false, true, true);
             AddTool(result, "set_enabled", "Set object enabled state", "Enable or disable a GameObject, Behaviour, or writable enabled member.", SchemaRequired(new[] { "object_id", "enabled" }, Prop("object_id", Id()), Prop("enabled", Boolean())), false, true, true);
