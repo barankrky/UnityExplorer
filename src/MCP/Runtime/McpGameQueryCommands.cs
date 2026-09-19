@@ -57,14 +57,21 @@ namespace UnityExplorer.MCP.Runtime
         {
             string objectId = RequiredString(command, "objectId");
             object target = registry.Resolve(objectId);
-            int depth = command.GetInt32("depth", 2, 0, options.MaximumSnapshotDepth), maxItems = command.GetInt32("maxItems", options.MaximumSerializedItems, 1, options.MaximumSerializedItems);
-            McpJsonValue result = codec.Serialize(target, depth, maxItems);
+            // include_static mirrors the Inspector's All/Instance/Static scope control.
+            McpGameExecutorOptions effective = options;
+            if (command.GetBoolean("includeStatic", options.IncludeStaticMembers) != options.IncludeStaticMembers)
+            {
+                effective = options.Clone();
+                effective.IncludeStaticMembers = command.GetBoolean("includeStatic", options.IncludeStaticMembers);
+            }
+            int depth = command.GetInt32("depth", 2, 0, effective.MaximumSnapshotDepth), maxItems = command.GetInt32("maxItems", effective.MaximumSerializedItems, 1, effective.MaximumSerializedItems);
+            McpJsonValue result = new McpValueCodec(registry, effective).Serialize(target, depth, maxItems);
             if (result != null && result.Kind == McpJsonValue.JsonKind.Object)
             {
                 // These options are part of the get_object contract; honour them rather than
                 // returning the same payload regardless of what the caller asked for.
                 bool includeMembers = command.GetBoolean("includeMembers", true);
-                if (!includeMembers) result.ObjectValue.Remove("members");
+                if (!includeMembers) { result.ObjectValue.Remove("members"); result.ObjectValue.Remove("memberInfo"); }
                 else FilterMembers(result, command.GetString("memberFilter", null));
                 if (command.GetBoolean("includeMethods", false))
                 {
@@ -88,6 +95,10 @@ namespace UnityExplorer.MCP.Runtime
             foreach (KeyValuePair<string, McpJsonValue> pair in members.ObjectValue)
                 if (pair.Key.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) discarded.Add(pair.Key);
             for (int i = 0; i < discarded.Count; i++) members.ObjectValue.Remove(discarded[i]);
+            // Keep the sibling metadata map in step so it never describes removed members.
+            McpJsonValue info;
+            if (snapshot.TryGet("memberInfo", out info) && info != null && info.Kind == McpJsonValue.JsonKind.Object)
+                for (int i = 0; i < discarded.Count; i++) info.ObjectValue.Remove(discarded[i]);
         }
 
         private McpJsonValue GetMember(McpJsonValue command)

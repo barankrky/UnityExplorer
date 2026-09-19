@@ -117,7 +117,7 @@ namespace UnityExplorer.MCP.Runtime
         public McpGameExecutorOptions()
         {
             MaximumSearchResults = 200; MaximumSnapshotDepth = 3; MaximumSerializedItems = 256; MaximumMembersPerObject = 128; MaximumBatchCommands = 64;
-            IncludeNonPublicMembers = true; AllowMethodInvocation = true; AllowObjectCreation = true; AllowObjectDestruction = true;
+            IncludeNonPublicMembers = true; IncludeStaticMembers = false; AllowMethodInvocation = true; AllowObjectCreation = true; AllowObjectDestruction = true;
         }
         public int MaximumSearchResults { get; set; }
         public int MaximumSnapshotDepth { get; set; }
@@ -125,6 +125,23 @@ namespace UnityExplorer.MCP.Runtime
         public int MaximumMembersPerObject { get; set; }
         public int MaximumBatchCommands { get; set; }
         public bool IncludeNonPublicMembers { get; set; }
+        /// <summary>
+        /// Include static fields and properties when snapshotting. Off by default because reading
+        /// a static member through an instance is ambiguous, but the Inspector exposes statics
+        /// under its Static scope and agents need the same view.
+        /// </summary>
+        public bool IncludeStaticMembers { get; set; }
+
+        internal McpGameExecutorOptions Clone()
+        {
+            McpGameExecutorOptions copy = new McpGameExecutorOptions();
+            copy.MaximumSearchResults = MaximumSearchResults; copy.MaximumSnapshotDepth = MaximumSnapshotDepth;
+            copy.MaximumSerializedItems = MaximumSerializedItems; copy.MaximumMembersPerObject = MaximumMembersPerObject;
+            copy.MaximumBatchCommands = MaximumBatchCommands; copy.IncludeNonPublicMembers = IncludeNonPublicMembers;
+            copy.IncludeStaticMembers = IncludeStaticMembers; copy.AllowMethodInvocation = AllowMethodInvocation;
+            copy.AllowObjectCreation = AllowObjectCreation; copy.AllowObjectDestruction = AllowObjectDestruction;
+            return copy;
+        }
         public bool AllowMethodInvocation { get; set; }
         public bool AllowObjectCreation { get; set; }
         public bool AllowObjectDestruction { get; set; }

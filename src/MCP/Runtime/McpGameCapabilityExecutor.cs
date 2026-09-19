@@ -150,20 +150,38 @@ namespace UnityExplorer.MCP.Runtime
             bool includeNonPublic = options.IncludeNonPublicMembers && command.GetBoolean("includeNonPublic", true);
             bool includeInherited = command.GetBoolean("includeInherited", true);
             bool includeStatic = command.GetBoolean("includeStatic", true);
+            bool includeConstructors = command.GetBoolean("includeConstructors", false);
             BindingFlags flags = McpReflection.Flags(includeNonPublic);
-            if (!includeInherited) flags |= BindingFlags.DeclaredOnly;
+            // DeclaredOnly must be combined with Instance/Static, otherwise the binding returns
+            // nothing. Previously includeInherited=false was silently ignored and callers still
+            // received every inherited method, drowning the game's own API in IL2CPP plumbing.
+            if (!includeInherited) flags = (flags & ~BindingFlags.FlattenHierarchy) | BindingFlags.DeclaredOnly;
             MethodInfo[] methods = type.GetMethods(flags);
-            Array.Sort(methods, delegate(MethodInfo a, MethodInfo b) { return string.CompareOrdinal(MethodSignature(a), MethodSignature(b)); });
-            McpJsonValue entries = McpJsonValue.Array();
-            for (int i = 0; i < methods.Length && entries.ArrayValue.Count < limit; i++)
+            // The Inspector exposes constructors alongside methods; without this an agent has no
+            // way to discover how to build a type. ConstructorInfo is not a MethodInfo, so the
+            // combined list is typed as MethodBase.
+            List<MethodBase> methodList = new List<MethodBase>(methods.Length);
+            for (int i = 0; i < methods.Length; i++) methodList.Add(methods[i]);
+            if (includeConstructors)
             {
-                MethodInfo method = methods[i];
+                ConstructorInfo[] constructors = type.GetConstructors(flags);
+                for (int i = 0; i < constructors.Length; i++) methodList.Add(constructors[i]);
+            }
+            methodList.Sort(delegate(MethodBase a, MethodBase b) { return string.CompareOrdinal(MethodSignature(a), MethodSignature(b)); });
+            McpJsonValue entries = McpJsonValue.Array();
+            for (int i = 0; i < methodList.Count && entries.ArrayValue.Count < limit; i++)
+            {
+                MethodBase method = methodList[i];
                 if (method.ContainsGenericParameters || McpReflection.IsUnsafeMember(method) || (target == null && !method.IsStatic) || (!includeStatic && method.IsStatic)) continue;
                 if (!string.IsNullOrEmpty(filter) && method.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 McpJsonValue entry = McpJsonValue.Object();
                 entry.ObjectValue["name"] = McpJsonValue.From(method.Name);
+                entry.ObjectValue["kind"] = McpJsonValue.From(method is ConstructorInfo ? "constructor" : "method");
                 entry.ObjectValue["signature"] = McpJsonValue.From(MethodSignature(method));
-                entry.ObjectValue["returnType"] = McpJsonValue.From(method.ReturnType.FullName);
+                MethodInfo asMethod = method as MethodInfo;
+                entry.ObjectValue["returnType"] = McpJsonValue.From(asMethod == null ? null : asMethod.ReturnType.FullName);
+                entry.ObjectValue["declaredBy"] = McpJsonValue.From(method.DeclaringType == null ? null : method.DeclaringType.FullName);
+                entry.ObjectValue["inherited"] = McpJsonValue.From(method.DeclaringType != type);
                 entry.ObjectValue["static"] = McpJsonValue.From(method.IsStatic);
                 entry.ObjectValue["public"] = McpJsonValue.From(method.IsPublic);
                 McpJsonValue parameters = McpJsonValue.Array();
@@ -228,6 +246,7 @@ namespace UnityExplorer.MCP.Runtime
             CopyAlias(copy, "query", "name"); CopyAlias(copy, "max_results", "limit"); CopyAlias(copy, "exact", "exactName");
             CopyAlias(copy, "name_filter", "filter"); CopyAlias(copy, "include_non_public", "includeNonPublic");
             CopyAlias(copy, "include_inherited", "includeInherited"); CopyAlias(copy, "include_static", "includeStatic");
+            CopyAlias(copy, "include_constructors", "includeConstructors");
             CopyAlias(copy, "member_name", "member"); CopyAlias(copy, "member_path", "member");
             CopyAlias(copy, "method_name", "method"); CopyAlias(copy, "arguments", "args");
             CopyAlias(copy, "stop_on_error", "stopOnError"); CopyAlias(copy, "max_depth", "depth");

@@ -42,7 +42,7 @@ namespace UnityExplorer.MCP.Runtime
         {
             if (supplied > parameters.Length) return false; for (int i = supplied; i < parameters.Length; i++) if (!parameters[i].IsOptional && !parameters[i].IsOut) return false; return true;
         }
-        private static string MethodSignature(MethodInfo method)
+        private static string MethodSignature(MethodBase method)
         {
             ParameterInfo[] parameters = method.GetParameters(); string[] names = new string[parameters.Length]; for (int i = 0; i < parameters.Length; i++) names[i] = parameters[i].ParameterType.FullName; return method.DeclaringType.FullName + "." + method.Name + "(" + string.Join(",", names) + ")";
         }

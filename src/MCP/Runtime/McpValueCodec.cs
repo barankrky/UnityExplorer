@@ -138,6 +138,12 @@ namespace UnityExplorer.MCP.Runtime
                 McpJsonValue reference = McpJsonValue.Object();
                 reference.ObjectValue["objectId"] = McpJsonValue.From(registry.Register(value));
                 reference.ObjectValue["type"] = McpJsonValue.From(type.FullName);
+                // Surface the payload of simple wrapper types such as EB.SafeBool, which the
+                // Inspector renders as "True (EB.SafeBool)". Without this an agent sees only an
+                // opaque handle and cannot tell true from false without a second round trip.
+                McpJsonValue unwrapped;
+                if (depth <= 0 && TryReadSimpleValue(value, type, out unwrapped))
+                    reference.ObjectValue["value"] = unwrapped;
                 return reference;
             }
 
@@ -175,20 +181,41 @@ namespace UnityExplorer.MCP.Runtime
         private void AddMembers(McpJsonValue target, object value, Type type, int depth, SerializationState state)
         {
             McpJsonValue members = McpJsonValue.Object();
+            // Sibling map describing each member the way the Inspector labels them (Property,
+            // Field, Static). Without it an agent cannot tell a property from its backing field:
+            // AlertNotifEnabled and _alertNotifsEnabled both appear, indistinguishable.
+            McpJsonValue info = McpJsonValue.Object();
             int count = 0;
             // Two members can differ only by case, such as a property and its backing field,
             // or a field named Method beside a property named method. Emitting both produces a
             // JSON object with keys that differ only in casing, which strict parsers reject
             // (PowerShell ConvertFrom-Json throws). Keep the first name and skip the rest.
             HashSet<string> emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (MemberInfo member in McpReflection.GetReadableMembers(type, options.IncludeNonPublicMembers))
+            foreach (MemberInfo member in McpReflection.GetReadableMembers(type, options.IncludeNonPublicMembers, options.IncludeStaticMembers))
             {
                 if (!emitted.Add(member.Name)) continue;
                 if (count++ >= options.MaximumMembersPerObject || state.Remaining-- <= 0) { members.ObjectValue["$truncated"] = McpJsonValue.From(true); break; }
                 try { members.ObjectValue[member.Name] = SerializeValue(McpReflection.GetMemberValue(member, value), depth, state); }
                 catch (Exception ex) { members.ObjectValue[member.Name] = ErrorValue(ex); }
+                info.ObjectValue[member.Name] = DescribeMember(member);
             }
             target.ObjectValue["members"] = members;
+            target.ObjectValue["memberInfo"] = info;
+        }
+
+        private static McpJsonValue DescribeMember(MemberInfo member)
+        {
+            McpJsonValue entry = McpJsonValue.Object();
+            entry.ObjectValue["kind"] = McpJsonValue.From(McpReflection.GetMemberKind(member));
+            entry.ObjectValue["declaredType"] = McpJsonValue.From(TypeName(McpReflection.GetMemberType(member)));
+            entry.ObjectValue["declaredBy"] = McpJsonValue.From(TypeName(member.DeclaringType));
+            if (McpReflection.IsStaticMember(member)) entry.ObjectValue["static"] = McpJsonValue.From(true);
+            return entry;
+        }
+
+        private static string TypeName(Type type)
+        {
+            return type == null ? null : (type.FullName ?? type.Name);
         }
 
         private McpJsonValue ObjectReference(UnityEngine.Object value)
@@ -248,6 +275,38 @@ namespace UnityExplorer.MCP.Runtime
             McpJsonValue result = McpJsonValue.Object();
             result.ObjectValue["truncated"] = McpJsonValue.From(true);
             return result;
+        }
+
+        private static readonly string[] SimpleValueMemberNames = { "Value", "m_Value", "value", "_value" };
+
+        /// <summary>
+        /// Read the payload of a lightweight wrapper type (EB.SafeBool, EB.SafeInt and similar),
+        /// which the Inspector displays as "True (EB.SafeBool)" rather than as a handle. Only
+        /// primitive, string and enum payloads are inlined so this cannot recurse or explode.
+        /// </summary>
+        private static bool TryReadSimpleValue(object value, Type type, out McpJsonValue result)
+        {
+            result = null;
+            if (value == null || type == null || type.IsPrimitive) return false;
+            try
+            {
+                for (int i = 0; i < SimpleValueMemberNames.Length; i++)
+                {
+                    MemberInfo member = McpReflection.FindReadableMember(type, SimpleValueMemberNames[i], true);
+                    if (member == null) continue;
+                    Type declared = McpReflection.GetMemberType(member);
+                    if (declared != typeof(string) && !declared.IsPrimitive && !declared.IsEnum) continue;
+                    object inner = McpReflection.GetMemberValue(member, value);
+                    if (inner == null) return false;
+                    if (inner is string) result = McpJsonValue.From((string)inner);
+                    else if (inner is bool) result = McpJsonValue.From((bool)inner);
+                    else if (inner is Enum) result = McpJsonValue.From(inner.ToString());
+                    else result = McpJsonValue.From(Convert.ToDouble(inner, CultureInfo.InvariantCulture));
+                    return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         private static bool IsNumeric(Type type)
@@ -359,18 +418,58 @@ namespace UnityExplorer.MCP.Runtime
 
         internal static IEnumerable<MemberInfo> GetReadableMembers(Type type, bool nonPublic)
         {
+            return GetReadableMembers(type, nonPublic, false);
+        }
+
+        /// <summary>
+        /// Enumerate readable fields and properties, optionally including static ones.
+        /// Static members are excluded by default because reading them through an instance is
+        /// misleading, but the Inspector exposes them under its Static scope and agents need the
+        /// same view.
+        /// </summary>
+        internal static IEnumerable<MemberInfo> GetReadableMembers(Type type, bool nonPublic, bool includeStatic)
+        {
             List<MemberInfo> result = new List<MemberInfo>();
             FieldInfo[] fields = type.GetFields(Flags(nonPublic));
             for (int i = 0; i < fields.Length; i++)
-                if (!fields[i].IsLiteral && !fields[i].IsStatic && !IsUnsafeMember(fields[i])) result.Add(fields[i]);
+                if (!fields[i].IsLiteral && (includeStatic || !fields[i].IsStatic) && !IsUnsafeMember(fields[i])) result.Add(fields[i]);
             PropertyInfo[] properties = type.GetProperties(Flags(nonPublic));
             for (int i = 0; i < properties.Length; i++)
             {
                 PropertyInfo property = properties[i];
-                if (property.GetIndexParameters().Length == 0 && property.GetGetMethod(nonPublic) != null && !property.GetGetMethod(nonPublic).IsStatic && !IsUnsafeMember(property)) result.Add(property);
+                MethodInfo getter = property.GetGetMethod(nonPublic);
+                if (property.GetIndexParameters().Length == 0 && getter != null && (includeStatic || !getter.IsStatic) && !IsUnsafeMember(property)) result.Add(property);
             }
             result.Sort(delegate(MemberInfo a, MemberInfo b) { return string.CompareOrdinal(a.Name, b.Name); });
             return result;
+        }
+
+        /// <summary>
+        /// Classify a member the way the Inspector does: "property" or "field".
+        /// </summary>
+        internal static string GetMemberKind(MemberInfo member)
+        {
+            if (member is PropertyInfo) return "property";
+            if (member is FieldInfo) return "field";
+            return "member";
+        }
+
+        /// <summary>
+        /// True when the member is static, so callers can label it instead of silently mixing
+        /// static and instance members together.
+        /// </summary>
+        internal static bool IsStaticMember(MemberInfo member)
+        {
+            FieldInfo field = member as FieldInfo;
+            if (field != null) return field.IsStatic;
+            PropertyInfo property = member as PropertyInfo;
+            if (property != null)
+            {
+                MethodInfo accessor = property.GetGetMethod(true) ?? property.GetSetMethod(true);
+                return accessor != null && accessor.IsStatic;
+            }
+            MethodBase method = member as MethodBase;
+            return method != null && method.IsStatic;
         }
 
         internal static MemberInfo FindReadableMember(Type type, string name, bool nonPublic)
