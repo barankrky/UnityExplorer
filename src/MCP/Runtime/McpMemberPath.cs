@@ -31,6 +31,11 @@ namespace UnityExplorer.MCP.Runtime
             Type currentType = targetType;
             for (int i = 0; i < tokens.Count; i++)
             {
+                // Mirror the guard on the write path: dereferencing a null owner would
+                // otherwise surface as a raw TargetException instead of a coded error.
+                if (current == null && tokens[i].Kind == TokenKind.Member)
+                    throw new McpCommandException("null_member", "Member path reached null before " + Describe(tokens[i]) + ".");
+
                 Type declaredType;
                 current = ReadToken(current, currentType, tokens[i], includeNonPublic, out declaredType);
                 currentType = current == null ? declaredType : McpReflection.GetActualType(current);
