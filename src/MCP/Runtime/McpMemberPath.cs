@@ -112,7 +112,47 @@ namespace UnityExplorer.MCP.Runtime
                 valueType = GetListElementType(ownerType, list, token.Index);
                 return list[token.Index];
             }
+            // IL2CPP collections implement a shadow IList that is unrelated to System.Collections.IList,
+            // so fall back to reflected Count + int indexer access.
+            object element;
+            if (TryReadIl2CppIndex(owner, ownerType, token.Index, out element, out valueType))
+                return element;
             throw new McpCommandException("not_indexable", "Value of type " + ownerType.FullName + " is not an array or IList.");
+        }
+
+        private static bool TryReadIl2CppIndex(object owner, Type ownerType, int index, out object value, out Type valueType)
+        {
+            value = null;
+            valueType = typeof(object);
+            if (!McpReflection.IsIl2CppIndexable(owner, ownerType)) return false;
+            MemberInfo countMember = McpReflection.FindCountMember(ownerType);
+            if (countMember == null) return false;
+            int count;
+            try { count = Convert.ToInt32(McpReflection.GetMemberValue(countMember, owner)); }
+            catch { return false; }
+            ValidateIndex(index, count);
+            MethodInfo getter = McpReflection.FindIndexerGetter(ownerType);
+            if (getter == null) return false;
+            valueType = McpReflection.GetIl2CppElementType(ownerType, getter);
+            value = getter.Invoke(McpReflection.GetDeclaringInstance(getter, owner), new object[] { index });
+            return true;
+        }
+
+        private static bool TryWriteIl2CppIndex(object owner, Type ownerType, int index, object value, out Type valueType)
+        {
+            valueType = typeof(object);
+            if (!McpReflection.IsIl2CppIndexable(owner, ownerType)) return false;
+            MemberInfo countMember = McpReflection.FindCountMember(ownerType);
+            if (countMember == null) return false;
+            int count;
+            try { count = Convert.ToInt32(McpReflection.GetMemberValue(countMember, owner)); }
+            catch { return false; }
+            ValidateIndex(index, count);
+            MethodInfo setter = McpReflection.FindIndexerSetter(ownerType);
+            if (setter == null) throw new McpCommandException("read_only_collection", "Collection of type " + ownerType.FullName + " exposes no writable int indexer.");
+            valueType = McpReflection.GetIl2CppElementType(ownerType, setter);
+            setter.Invoke(McpReflection.GetDeclaringInstance(setter, owner), new object[] { index, value });
+            return true;
         }
 
         private static Type GetWritableTokenType(object owner, Type ownerType, Token token, bool includeNonPublic)
@@ -138,6 +178,15 @@ namespace UnityExplorer.MCP.Runtime
                 if (list.IsReadOnly) throw new McpCommandException("read_only_collection", "The IList is read-only.");
                 return GetListElementType(ownerType, list, token.Index);
             }
+            // IL2CPP collections use a shadow IList; resolve the element type from the reflected indexer.
+            if (McpReflection.IsIl2CppIndexable(owner, ownerType))
+            {
+                MemberInfo countMember = McpReflection.FindCountMember(ownerType);
+                if (countMember != null) ValidateIndex(token.Index, Convert.ToInt32(McpReflection.GetMemberValue(countMember, owner)));
+                MethodInfo setter = McpReflection.FindIndexerSetter(ownerType);
+                if (setter == null) throw new McpCommandException("read_only_collection", "Collection of type " + ownerType.FullName + " exposes no writable int indexer.");
+                return McpReflection.GetIl2CppElementType(ownerType, setter);
+            }
             throw new McpCommandException("not_indexable", "Value of type " + ownerType.FullName + " is not an array or IList.");
         }
 
@@ -161,6 +210,7 @@ namespace UnityExplorer.MCP.Runtime
                 list[token.Index] = value;
                 return;
             }
+            if (TryWriteIl2CppIndex(owner, ownerType, token.Index, value, out _)) return;
             throw new McpCommandException("not_indexable", "Value of type " + ownerType.FullName + " is not an array or IList.");
         }
 

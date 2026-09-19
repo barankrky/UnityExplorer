@@ -433,6 +433,112 @@ namespace UnityExplorer.MCP.Runtime
             catch { return target; }
         }
 
+        // IL2CPP collections (Il2CppSystem.Collections.Generic.List<T>, Il2CppArrayBase<T> and its
+        // Il2CppReferenceArray/Il2CppStringArray/Il2CppStructArray subclasses) implement the shadow
+        // Il2CppSystem.Collections.IList interface, not System.Collections.IList. Casting to
+        // System.Collections.IList therefore fails and indexing would otherwise be impossible.
+        // Discover the members by reflection so this works on every runtime and interop generation.
+        private static readonly string[] CountMemberNames = { "Count", "Length", "_size", "count", "length" };
+        private static readonly string[] IndexerMethodNames = { "get_Item", "System_Collections_IList_get_Item" };
+        private static readonly string[] IndexerSetterNames = { "set_Item", "System_Collections_IList_set_Item" };
+
+        /// <summary>
+        /// Find a member describing the number of elements in an IL2CPP collection.
+        /// </summary>
+        internal static MemberInfo FindCountMember(Type type)
+        {
+            if (type == null) return null;
+            for (int i = 0; i < CountMemberNames.Length; i++)
+            {
+                MemberInfo member = FindReadableMember(type, CountMemberNames[i], true);
+                if (member != null && GetMemberType(member) == typeof(int)) return member;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Find an int-indexed getter on an IL2CPP collection.
+        /// </summary>
+        internal static MethodInfo FindIndexerGetter(Type type)
+        {
+            if (type == null) return null;
+            for (int i = 0; i < IndexerMethodNames.Length; i++)
+            {
+                MethodInfo[] candidates = type.GetMethods(Flags(true));
+                for (int c = 0; c < candidates.Length; c++)
+                {
+                    MethodInfo method = candidates[c];
+                    if (!string.Equals(method.Name, IndexerMethodNames[i], StringComparison.Ordinal) || method.IsStatic) continue;
+                    ParameterInfo[] parameters = method.GetParameters();
+                    if (parameters.Length != 1 || parameters[0].ParameterType != typeof(int)) continue;
+                    if (method.ReturnType == typeof(void)) continue;
+                    return method;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Find an int-indexed setter on an IL2CPP collection.
+        /// </summary>
+        internal static MethodInfo FindIndexerSetter(Type type)
+        {
+            if (type == null) return null;
+            for (int i = 0; i < IndexerSetterNames.Length; i++)
+            {
+                MethodInfo[] candidates = type.GetMethods(Flags(true));
+                for (int c = 0; c < candidates.Length; c++)
+                {
+                    MethodInfo method = candidates[c];
+                    if (!string.Equals(method.Name, IndexerSetterNames[i], StringComparison.Ordinal) || method.IsStatic) continue;
+                    ParameterInfo[] parameters = method.GetParameters();
+                    if (parameters.Length != 2 || parameters[0].ParameterType != typeof(int)) continue;
+                    return method;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Element type of an IL2CPP collection, used to convert values on the write path.
+        /// </summary>
+        internal static Type GetIl2CppElementType(Type type, MethodInfo indexer)
+        {
+            if (indexer != null && indexer.ReturnType != typeof(void)) return indexer.ReturnType;
+            if (type != null && type.IsGenericType)
+            {
+                Type[] arguments = type.GetGenericArguments();
+                if (arguments.Length == 1) return arguments[0];
+            }
+            if (type != null)
+            {
+                Type[] interfaces = type.GetInterfaces();
+                for (int i = 0; i < interfaces.Length; i++)
+                {
+                    if (interfaces[i].IsGenericType && interfaces[i].GetGenericArguments().Length == 1)
+                    {
+                        Type definition = interfaces[i].GetGenericTypeDefinition();
+                        string name = definition.FullName ?? definition.Name;
+                        if (name.IndexOf("IList", StringComparison.Ordinal) >= 0) return interfaces[i].GetGenericArguments()[0];
+                    }
+                }
+            }
+            return typeof(object);
+        }
+
+        /// <summary>
+        /// True when the value looks like an indexable IL2CPP collection.
+        /// </summary>
+        internal static bool IsIl2CppIndexable(object owner, Type type)
+        {
+            if (owner == null || type == null) return false;
+            string fullName = type.FullName ?? type.Name;
+            bool il2cppCollection = fullName.StartsWith("Il2Cpp", StringComparison.Ordinal)
+                || fullName.StartsWith("Il2CppInterop.", StringComparison.Ordinal);
+            if (!il2cppCollection) return false;
+            return FindIndexerGetter(type) != null;
+        }
+
         internal static string GetGameObjectPath(GameObject go)
         {
             if (go == null) return null;
