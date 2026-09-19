@@ -267,6 +267,70 @@ namespace UnityExplorer.MCP.Runtime
             result.ObjectValue["scene"] = McpJsonValue.From(go.scene.name);
             result.ObjectValue["path"] = McpJsonValue.From(McpReflection.GetGameObjectPath(go));
             result.ObjectValue["transformId"] = McpJsonValue.From(registry.Register(go.transform));
+            AddHierarchy(result, go);
+            AddComponents(result, go);
+        }
+
+        /// <summary>
+        /// Describe the GameObject's children and its position among its siblings, mirroring the
+        /// Object Explorer's hierarchy tree and its "Sibling Index" column. These are plain reads,
+        /// so they must not require invoke_method, which the dangerous-operations policy blocks.
+        /// </summary>
+        private void AddHierarchy(McpJsonValue result, GameObject go)
+        {
+            try
+            {
+                Transform transform = go.transform;
+                if (transform == null) return;
+                result.ObjectValue["childCount"] = McpJsonValue.From((double)transform.childCount);
+                result.ObjectValue["siblingIndex"] = McpJsonValue.From((double)transform.GetSiblingIndex());
+                Transform parent = transform.parent;
+                if (parent != null) result.ObjectValue["parentId"] = McpJsonValue.From(registry.Register(parent.gameObject));
+                McpJsonValue children = McpJsonValue.Array();
+                int count = Math.Min(transform.childCount, MaximumChildObjects);
+                for (int i = 0; i < count; i++)
+                {
+                    Transform child = transform.GetChild(i);
+                    if (child == null) continue;
+                    GameObject childObject = child.gameObject;
+                    McpJsonValue entry = McpJsonValue.Object();
+                    entry.ObjectValue["objectId"] = McpJsonValue.From(registry.Register(childObject));
+                    entry.ObjectValue["name"] = McpJsonValue.From(childObject.name);
+                    entry.ObjectValue["siblingIndex"] = McpJsonValue.From((double)i);
+                    entry.ObjectValue["childCount"] = McpJsonValue.From((double)child.childCount);
+                    entry.ObjectValue["activeSelf"] = McpJsonValue.From(childObject.activeSelf);
+                    children.ArrayValue.Add(entry);
+                }
+                if (transform.childCount > count) children.ArrayValue.Add(Truncated());
+                result.ObjectValue["children"] = children;
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// List the components attached to the GameObject, which the Inspector shows as its
+        /// component list. Read-only, so it stays available under the default safe policy.
+        /// </summary>
+        private void AddComponents(McpJsonValue result, GameObject go)
+        {
+            try
+            {
+                Component[] components = go.GetComponents<Component>();
+                McpJsonValue entries = McpJsonValue.Array();
+                int count = Math.Min(components.Length, MaximumChildObjects);
+                for (int i = 0; i < count; i++)
+                {
+                    Component component = components[i];
+                    if (ReferenceEquals(component, null)) { entries.ArrayValue.Add(McpJsonValue.Null()); continue; }
+                    McpJsonValue entry = McpJsonValue.Object();
+                    entry.ObjectValue["objectId"] = McpJsonValue.From(registry.Register(component));
+                    entry.ObjectValue["type"] = McpJsonValue.From(TypeName(McpReflection.GetActualType(component)));
+                    entries.ArrayValue.Add(entry);
+                }
+                result.ObjectValue["componentCount"] = McpJsonValue.From((double)components.Length);
+                result.ObjectValue["components"] = entries;
+            }
+            catch { }
         }
 
         private static object ConvertUntyped(McpJsonValue json)
@@ -310,6 +374,12 @@ namespace UnityExplorer.MCP.Runtime
         }
 
         private static readonly string[] SimpleValueMemberNames = { "Value", "m_Value", "value", "_value" };
+
+        /// <summary>
+        /// Upper bound on children and components inlined per GameObject, so a large hierarchy
+        /// cannot blow up a snapshot. Exceeding it adds a $truncated marker.
+        /// </summary>
+        private const int MaximumChildObjects = 128;
 
         /// <summary>
         /// Read the payload of a lightweight wrapper type (EB.SafeBool, EB.SafeInt and similar),
