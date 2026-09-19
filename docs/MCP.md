@@ -1,6 +1,6 @@
 # UnityExplorer MCP
 
-This document covers the built-in MCP (Model Context Protocol) server in UnityExplorer: architecture, setup, client configuration, the tool set, security switches, runtime limits, and troubleshooting. For the threat model and security rationale, see [MCP_SECURITY.md](MCP_SECURITY.md).
+This document covers the built-in MCP (Model Context Protocol) server in UnityExplorer: architecture, setup, client configuration, the tool set, security switches, runtime limits, and troubleshooting. For the threat model and security rationale, see [MCP_SECURITY.md](MCP_SECURITY.md). For a per-tool parameter reference — what each argument does, the response shape, error codes, and what has been verified against a real IL2CPP game — see [MCP_CAPABILITIES.md](MCP_CAPABILITIES.md).
 
 > MCP lets an external agent drive the running game. Validate on an offline, recoverable test save first, and never grant write access for untrusted games, servers, or MCP clients.
 
@@ -134,7 +134,11 @@ The current tool set:
 | `destroy_object` | Destroy an object, optionally immediately | Dangerous; requires read-only off **and** dangerous operations on |
 | `execute_batch` | Run multiple operations in sequence, each independently permission-checked | Depends on the most dangerous sub-operation |
 
-Required arguments per tool: `get_status`, `list_scenes`, `search_objects`, and `create_object` take none; `get_object`, `list_methods`, `set_transform`, and `destroy_object` require `object_id`; `get_member` requires `object_id` and `member_path`; `set_member` requires `object_id`, `member_path`, and `value`; `set_enabled` requires `object_id` and `enabled`; `invoke_method` requires `object_id` and `method`; `execute_batch` requires `operations`.
+Required arguments per tool: `get_status`, `list_scenes`, `search_objects`, `get_object`, `list_methods`, and `create_object` take none; `get_member` requires `member_path`; `set_member` requires `member_path` and `value`; `set_transform` and `destroy_object` require `object_id`; `set_enabled` requires `object_id` and `enabled`; `invoke_method` requires `method`; `execute_batch` requires `operations`.
+
+The object-addressed tools (`get_object`, `get_member`, `list_methods`, `set_member`, `invoke_method`) accept **either** `object_id` for an instance **or** `type` for a static view of a class, matching the Inspector's `[S]` tab. A type-only call lists static members only.
+
+For the full parameter list of each tool, including response fields and error codes, see [MCP_CAPABILITIES.md](MCP_CAPABILITIES.md).
 
 ### 4.1 Permission matrix
 
