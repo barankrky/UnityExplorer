@@ -248,6 +248,7 @@ namespace UnityExplorer.MCP.Runtime
             CopyAlias(copy, "include_inherited", "includeInherited"); CopyAlias(copy, "include_static", "includeStatic");
             CopyAlias(copy, "include_constructors", "includeConstructors");
             CopyAlias(copy, "member_name", "member"); CopyAlias(copy, "member_path", "member");
+            CopyAlias(copy, "value_type", "valueType");
             CopyAlias(copy, "method_name", "method"); CopyAlias(copy, "arguments", "args");
             CopyAlias(copy, "stop_on_error", "stopOnError"); CopyAlias(copy, "max_depth", "depth");
             CopyAlias(copy, "max_items", "maxItems"); CopyAlias(copy, "exact_name", "exactName");
