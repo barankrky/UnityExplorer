@@ -214,6 +214,43 @@ namespace UnityExplorer.MCP.Runtime
             throw new McpCommandException("not_indexable", "Value of type " + ownerType.FullName + " is not an array or IList.");
         }
 
+        /// <summary>
+        /// Resolve the declared type a path's final token would read or write, walking declared
+        /// types statically without needing an instance. Used to validate a caller's declared
+        /// value_type before mutating. Returns null when the type cannot be determined.
+        /// </summary>
+        internal static Type GetLeafType(Type ownerType, string path, bool includeNonPublic)
+        {
+            try
+            {
+                List<Token> tokens = Parse(path);
+                Type currentType = ownerType;
+                for (int i = 0; i < tokens.Count; i++)
+                {
+                    Token token = tokens[i];
+                    if (token.Kind == TokenKind.Member)
+                    {
+                        MemberInfo member = McpReflection.FindReadableMember(currentType, token.Name, includeNonPublic);
+                        if (member == null) return null;
+                        currentType = McpReflection.GetMemberType(member);
+                    }
+                    else
+                    {
+                        // Indexing: resolve the element type from the declared collection type.
+                        if (currentType.IsArray) currentType = currentType.GetElementType() ?? typeof(object);
+                        else
+                        {
+                            MethodInfo getter = McpReflection.FindIndexerGetter(currentType);
+                            currentType = McpReflection.GetIl2CppElementType(currentType, getter);
+                        }
+                    }
+                    if (currentType == null) return null;
+                }
+                return currentType;
+            }
+            catch { return null; }
+        }
+
         private static List<Token> Parse(string path)
         {
             if (string.IsNullOrEmpty(path)) throw new McpCommandException("invalid_member_path", "Member path is required.");

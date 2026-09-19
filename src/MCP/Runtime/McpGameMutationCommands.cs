@@ -10,8 +10,38 @@ namespace UnityExplorer.MCP.Runtime
         {
             object target; Type type; ResolveTarget(command, out target, out type); string path = RequiredString(command, "member"); McpJsonValue input;
             if (!command.TryGet("value", out input)) throw new McpCommandException("invalid_command", "The 'value' property is required.");
+            // value_type was declared in the schema but never read. The leaf's declared type comes
+            // from reflection, so this is a cross-check: it lets a caller state the type it intends
+            // and get a clear error when that disagrees with the member, instead of a value being
+            // silently coerced to whatever the member happens to be.
+            Type declared = command.GetString("valueType", null) == null ? null : McpReflection.FindType(command.GetString("valueType", null));
+            if (declared != null) VerifyWritableType(type, path, declared, options.IncludeNonPublicMembers);
             object value = McpMemberPath.Write(target, type, path, input, codec, options.IncludeNonPublicMembers);
             McpJsonValue r = McpJsonValue.Object(); r.ObjectValue["member"] = McpJsonValue.From(path); r.ObjectValue["value"] = codec.Serialize(value, 1, 32); return r;
+        }
+
+        /// <summary>
+        /// Confirm the caller's declared value_type agrees with the member the path resolves to.
+        /// Numeric widening is accepted; anything else is reported as a mismatch.
+        /// </summary>
+        private static void VerifyWritableType(Type ownerType, string path, Type declared, bool includeNonPublic)
+        {
+            try
+            {
+                Type actual = McpMemberPath.GetLeafType(ownerType, path, includeNonPublic);
+                if (actual == null) return;
+                if (actual == declared || actual.IsAssignableFrom(declared) || declared.IsAssignableFrom(actual)) return;
+                if (IsNumericType(actual) && IsNumericType(declared)) return;
+                throw new McpCommandException("value_type_mismatch", "Member " + path + " is " + actual.FullName + " but value_type is " + declared.FullName + ".");
+            }
+            catch (McpCommandException) { throw; }
+            catch { }
+        }
+
+        private static bool IsNumericType(Type type)
+        {
+            TypeCode code = Type.GetTypeCode(type);
+            return code >= TypeCode.SByte && code <= TypeCode.Decimal;
         }
 
         private McpJsonValue SetTransform(McpJsonValue command)
