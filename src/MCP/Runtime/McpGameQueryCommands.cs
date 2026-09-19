@@ -91,14 +91,19 @@ namespace UnityExplorer.MCP.Runtime
 
         private McpJsonValue Search(McpJsonValue command)
         {
-            Type type = McpReflection.FindType(command.GetString("type", "UnityEngine.GameObject"));
+            // kind selects the coarse search type when the caller did not name one. Filtering the
+            // default GameObject search by kind instead would make kind=component always empty,
+            // because no GameObject is a Component.
+            string kind = NormalizeKind(command.GetString("kind", null));
+            string requestedType = command.GetString("type", null);
+            if (string.IsNullOrEmpty(requestedType)) requestedType = DefaultTypeForKind(kind);
+            Type type = McpReflection.FindType(requestedType);
             if (!typeof(UnityEngine.Object).IsAssignableFrom(type)) throw new McpCommandException("invalid_type", "Search type must derive from UnityEngine.Object.");
             int limit = command.GetInt32("limit", 50, 1, options.MaximumSearchResults); string name = command.GetString("name", null), sceneName = command.GetString("scene", null), path = command.GetString("path", null);
             bool exact = command.GetBoolean("exactName", false), includeExplorer = command.GetBoolean("includeExplorer", false);
-            // These were declared in the tool schema but never read, so callers filtering by kind or
-            // asking for inactive objects got the unfiltered result set instead.
+            // Declared in the schema but never read, so callers asking for inactive objects got the
+            // unfiltered result set instead.
             bool includeInactive = command.GetBoolean("includeInactive", true);
-            string kind = NormalizeKind(command.GetString("kind", null));
             UnityEngine.Object[] objects = RuntimeHelper.FindObjectsOfTypeAll(type); McpJsonValue matches = McpJsonValue.Array();
             for (int i = 0; i < objects.Length && matches.ArrayValue.Count < limit; i++)
             {
@@ -122,6 +127,22 @@ namespace UnityExplorer.MCP.Runtime
                 matches.ArrayValue.Add(ObjectSummary(obj, go));
             }
             McpJsonValue r = McpJsonValue.Object(); r.ObjectValue["objects"] = matches; r.ObjectValue["count"] = McpJsonValue.From((double)matches.ArrayValue.Count); r.ObjectValue["scanned"] = McpJsonValue.From((double)objects.Length); r.ObjectValue["limited"] = McpJsonValue.From(matches.ArrayValue.Count >= limit); return r;
+        }
+
+        /// <summary>
+        /// The search type a coarse kind implies when the caller supplied no explicit type.
+        /// UnityEngine.Object covers the asset and scriptableobject cases, which are not
+        /// GameObject or Component subclasses.
+        /// </summary>
+        private static string DefaultTypeForKind(string kind)
+        {
+            switch (kind)
+            {
+                case "component": return "UnityEngine.Component";
+                case "scriptableobject": return "UnityEngine.ScriptableObject";
+                case "asset": return "UnityEngine.Object";
+                default: return "UnityEngine.GameObject";
+            }
         }
 
         /// <summary>
