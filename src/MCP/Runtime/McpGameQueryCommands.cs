@@ -65,14 +65,15 @@ namespace UnityExplorer.MCP.Runtime
                 effective.IncludeStaticMembers = command.GetBoolean("includeStatic", options.IncludeStaticMembers);
             }
             int depth = command.GetInt32("depth", 2, 0, effective.MaximumSnapshotDepth), maxItems = command.GetInt32("maxItems", effective.MaximumSerializedItems, 1, effective.MaximumSerializedItems);
-            McpJsonValue result = new McpValueCodec(registry, effective).Serialize(target, depth, maxItems);
+            // The filter is applied during serialization, before the per-object member cap, so it
+            // can select members that alphabetical truncation would otherwise discard.
+            McpJsonValue result = new McpValueCodec(registry, effective).Serialize(target, depth, maxItems, command.GetString("memberFilter", null));
             if (result != null && result.Kind == McpJsonValue.JsonKind.Object)
             {
                 // These options are part of the get_object contract; honour them rather than
                 // returning the same payload regardless of what the caller asked for.
                 bool includeMembers = command.GetBoolean("includeMembers", true);
                 if (!includeMembers) { result.ObjectValue.Remove("members"); result.ObjectValue.Remove("memberInfo"); }
-                else FilterMembers(result, command.GetString("memberFilter", null));
                 if (command.GetBoolean("includeMethods", false))
                 {
                     // Reuse the list_methods path so the two surfaces cannot drift apart.
@@ -84,21 +85,6 @@ namespace UnityExplorer.MCP.Runtime
                 }
             }
             return result;
-        }
-
-        private static void FilterMembers(McpJsonValue snapshot, string filter)
-        {
-            if (string.IsNullOrEmpty(filter)) return;
-            McpJsonValue members;
-            if (!snapshot.TryGet("members", out members) || members == null || members.Kind != McpJsonValue.JsonKind.Object) return;
-            List<string> discarded = new List<string>();
-            foreach (KeyValuePair<string, McpJsonValue> pair in members.ObjectValue)
-                if (pair.Key.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) discarded.Add(pair.Key);
-            for (int i = 0; i < discarded.Count; i++) members.ObjectValue.Remove(discarded[i]);
-            // Keep the sibling metadata map in step so it never describes removed members.
-            McpJsonValue info;
-            if (snapshot.TryGet("memberInfo", out info) && info != null && info.Kind == McpJsonValue.JsonKind.Object)
-                for (int i = 0; i < discarded.Count; i++) info.ObjectValue.Remove(discarded[i]);
         }
 
         private McpJsonValue GetMember(McpJsonValue command)

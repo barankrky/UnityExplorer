@@ -20,9 +20,18 @@ namespace UnityExplorer.MCP.Runtime
 
         internal McpJsonValue Serialize(object value, int requestedDepth, int requestedItems)
         {
+            return Serialize(value, requestedDepth, requestedItems, null);
+        }
+
+        internal McpJsonValue Serialize(object value, int requestedDepth, int requestedItems, string memberFilter)
+        {
             int depth = Clamp(requestedDepth, 0, options.MaximumSnapshotDepth);
             int items = Clamp(requestedItems, 1, options.MaximumSerializedItems);
             SerializationState state = new SerializationState(items);
+            // Record which object the filter belongs to. The filter describes the inspected
+            // object's own members, so it must not be applied to nested objects as well.
+            state.MemberFilter = string.IsNullOrEmpty(memberFilter) ? null : memberFilter;
+            state.MemberFilterTarget = state.MemberFilter == null ? null : value;
             return SerializeValue(value, depth, state);
         }
 
@@ -185,16 +194,39 @@ namespace UnityExplorer.MCP.Runtime
             // Field, Static). Without it an agent cannot tell a property from its backing field:
             // AlertNotifEnabled and _alertNotifsEnabled both appear, indistinguishable.
             McpJsonValue info = McpJsonValue.Object();
-            int count = 0;
-            // Two members can differ only by case, such as a property and its backing field,
-            // or a field named Method beside a property named method. Emitting both produces a
-            // JSON object with keys that differ only in casing, which strict parsers reject
-            // (PowerShell ConvertFrom-Json throws). Keep the first name and skip the rest.
-            HashSet<string> emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            bool filterThisObject = state.MemberFilter != null && ReferenceEquals(state.MemberFilterTarget, value);
+
+            // Materialise the candidates first so truncation can report how much was dropped.
+            // A bare $truncated flag left the caller unable to tell whether one member or a
+            // thousand were missing, or which names to ask for with member_filter.
+            List<MemberInfo> candidates = new List<MemberInfo>();
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (MemberInfo member in McpReflection.GetReadableMembers(type, options.IncludeNonPublicMembers, options.IncludeStaticMembers))
             {
-                if (!emitted.Add(member.Name)) continue;
-                if (count++ >= options.MaximumMembersPerObject || state.Remaining-- <= 0) { members.ObjectValue["$truncated"] = McpJsonValue.From(true); break; }
+                // Filter before the cap. Applying it afterwards meant a filtered request could
+                // still come back empty for a member that exists, because the member had already
+                // been dropped by MaximumMembersPerObject.
+                if (filterThisObject && member.Name.IndexOf(state.MemberFilter, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                // Two members can differ only by case, such as a property and its backing field,
+                // or a field named Method beside a property named method. Emitting both produces
+                // a JSON object with keys that differ only in casing, which strict parsers reject
+                // (PowerShell ConvertFrom-Json throws). Keep the first name and skip the rest.
+                if (!seen.Add(member.Name)) continue;
+                candidates.Add(member);
+            }
+
+            int emittedCount = 0;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                MemberInfo member = candidates[i];
+                if (emittedCount >= options.MaximumMembersPerObject || state.Remaining <= 0)
+                {
+                    members.ObjectValue["$truncated"] = McpJsonValue.From(true);
+                    members.ObjectValue["$truncatedMembers"] = McpJsonValue.From((double)(candidates.Count - emittedCount));
+                    break;
+                }
+                emittedCount++;
+                state.Remaining--;
                 try { members.ObjectValue[member.Name] = SerializeValue(McpReflection.GetMemberValue(member, value), depth, state); }
                 catch (Exception ex) { members.ObjectValue[member.Name] = ErrorValue(ex); }
                 info.ObjectValue[member.Name] = DescribeMember(member);
@@ -354,6 +386,16 @@ namespace UnityExplorer.MCP.Runtime
             internal SerializationState(int remaining) { Remaining = remaining; Visited = new HashSet<object>(ReferenceEqualityComparer.Instance); }
             internal int Remaining;
             internal readonly HashSet<object> Visited;
+            /// <summary>
+            /// Applied while walking members, before the per-object cap, so a filter can reach
+            /// members that would otherwise be cut by MaximumMembersPerObject.
+            /// </summary>
+            internal string MemberFilter;
+            /// <summary>
+            /// The object MemberFilter applies to. Nested objects serialize their full member
+            /// list so a filter on the inspected object does not hide unrelated state.
+            /// </summary>
+            internal object MemberFilterTarget;
         }
 
         private sealed class ReferenceEqualityComparer : IEqualityComparer<object>

@@ -116,7 +116,12 @@ namespace UnityExplorer.MCP.Runtime
     {
         public McpGameExecutorOptions()
         {
-            MaximumSearchResults = 200; MaximumSnapshotDepth = 3; MaximumSerializedItems = 256; MaximumMembersPerObject = 128; MaximumBatchCommands = 64;
+            // MaximumMembersPerObject bounds members listed for a single object; the shared
+            // MaximumSerializedItems budget bounds the whole response. The member cap must stay
+            // below the budget, otherwise the budget binds first and the truncation the caller
+            // sees is attributed to the wrong limit. Both are sized so a typical game component
+            // (Profile has ~130 members) is listed in full rather than silently cut mid-alphabet.
+            MaximumSearchResults = 200; MaximumSnapshotDepth = 3; MaximumSerializedItems = 1024; MaximumMembersPerObject = 512; MaximumBatchCommands = 64;
             IncludeNonPublicMembers = true; IncludeStaticMembers = false; AllowMethodInvocation = true; AllowObjectCreation = true; AllowObjectDestruction = true;
         }
         public int MaximumSearchResults { get; set; }
