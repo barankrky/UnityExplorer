@@ -172,11 +172,16 @@ namespace UnityExplorer.MCP.Runtime
             for (int i = 0; i < methodList.Count && entries.ArrayValue.Count < limit; i++)
             {
                 MethodBase method = methodList[i];
-                if (method.ContainsGenericParameters || McpReflection.IsUnsafeMember(method) || (target == null && !method.IsStatic) || (!includeStatic && method.IsStatic)) continue;
+                // Generic methods are listed rather than skipped. They cannot be invoked without
+                // generic_type_arguments, but hiding them made that option unusable: a caller could
+                // not discover the name or arity of a method it was able to call.
+                if (McpReflection.IsUnsafeMember(method) || (target == null && !method.IsStatic) || (!includeStatic && method.IsStatic)) continue;
                 if (!string.IsNullOrEmpty(filter) && method.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 McpJsonValue entry = McpJsonValue.Object();
                 entry.ObjectValue["name"] = McpJsonValue.From(method.Name);
                 entry.ObjectValue["kind"] = McpJsonValue.From(method is ConstructorInfo ? "constructor" : "method");
+                // Flag an open generic so a caller knows generic_type_arguments is required.
+                if (method.IsGenericMethodDefinition) entry.ObjectValue["generic"] = McpJsonValue.From(true);
                 entry.ObjectValue["signature"] = McpJsonValue.From(MethodSignature(method));
                 MethodInfo asMethod = method as MethodInfo;
                 entry.ObjectValue["returnType"] = McpJsonValue.From(asMethod == null ? null : asMethod.ReturnType.FullName);
