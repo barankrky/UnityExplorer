@@ -12,7 +12,16 @@ namespace UnityExplorer.MCP.Runtime
         private readonly Dictionary<string, object> byId = new Dictionary<string, object>(StringComparer.Ordinal);
         private readonly Dictionary<object, string> managedIds = new Dictionary<object, string>(ReferenceComparer.Instance);
         private readonly Dictionary<int, string> unityIds = new Dictionary<int, string>();
+        private readonly Queue<string> insertionOrder = new Queue<string>();
         private long nextId = 1;
+
+        /// <summary>
+        /// Hard ceiling on retained handles. Prune reclaims destroyed Unity objects, but a
+        /// managed wrapper is never reported as destroyed, so a long session reading many
+        /// distinct objects grows without bound: every wrapper ever serialized stays pinned
+        /// by byId and managedIds. Oldest handles are evicted first once the ceiling is hit.
+        /// </summary>
+        internal const int MaximumEntries = 8192;
 
         public int Count { get { lock (sync) return byId.Count; } }
 
@@ -31,12 +40,12 @@ namespace UnityExplorer.MCP.Runtime
                         RemoveInternal(existing, previous);
                     }
                     string id = "u" + instanceId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-" + NextSuffix();
-                    unityIds[instanceId] = id; byId[id] = value; return id;
+                    unityIds[instanceId] = id; byId[id] = value; Track(id); return id;
                 }
 
                 string managed;
                 if (managedIds.TryGetValue(value, out managed) && byId.ContainsKey(managed)) return managed;
-                managed = "m" + NextSuffix(); managedIds[value] = managed; byId[managed] = value; return managed;
+                managed = "m" + NextSuffix(); managedIds[value] = managed; byId[managed] = value; Track(managed); return managed;
             }
         }
 
@@ -69,6 +78,21 @@ namespace UnityExplorer.MCP.Runtime
                 List<string> stale = new List<string>();
                 foreach (KeyValuePair<string, object> pair in byId) if (pair.Value == null || IsDestroyed(pair.Value)) stale.Add(pair.Key);
                 for (int i = 0; i < stale.Count; i++) RemoveInternal(stale[i], null); return stale.Count;
+            }
+        }
+
+        /// <summary>
+        /// Record insertion order and evict the oldest handles when the registry exceeds
+        /// MaximumEntries. Entries already removed are skipped, so the queue may hold stale
+        /// ids without costing anything beyond their string.
+        /// </summary>
+        private void Track(string id)
+        {
+            insertionOrder.Enqueue(id);
+            while (byId.Count > MaximumEntries && insertionOrder.Count > 0)
+            {
+                string oldest = insertionOrder.Dequeue();
+                if (byId.ContainsKey(oldest)) RemoveInternal(oldest, null);
             }
         }
 
