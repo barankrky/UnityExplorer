@@ -117,6 +117,20 @@ namespace UnityExplorer.MCP.Runtime
             }
 
             if (targetType == typeof(object)) return ConvertUntyped(json);
+
+            // Last resort for a complex parameter: a handle the registry already holds. This runs
+            // after every primitive, array, list and untyped conversion so it can only supply an
+            // object where nothing else could, and it is type-checked before being returned.
+            // Previously only UnityEngine.Object parameters accepted a handle, which made any
+            // method taking a plain class, struct or delegate argument uncallable.
+            string handle = ReadObjectHandle(json);
+            if (handle != null && registry.TryResolve(handle, out object resolvedArgument))
+            {
+                if (!targetType.IsInstanceOfType(resolvedArgument))
+                    throw new McpCommandException("conversion_failed", "Object " + handle + " is a " + McpReflection.GetActualType(resolvedArgument).FullName + ", not a " + targetType.FullName + ".");
+                return resolvedArgument;
+            }
+
             if (json.Kind != McpJsonValue.JsonKind.Object) throw Conversion(targetType);
 
             object instance;
@@ -129,6 +143,28 @@ namespace UnityExplorer.MCP.Runtime
                 McpReflection.SetMemberValue(member, instance, ConvertTo(pair.Value, McpReflection.GetMemberType(member)));
             }
             return instance;
+        }
+
+        /// <summary>
+        /// Extract a registry handle from an argument value. A handle is a bare string that the
+        /// registry actually knows, or the documented object form, so an ordinary string argument
+        /// is never mistaken for a handle. Returns null when the value is not a live handle.
+        /// </summary>
+        private string ReadObjectHandle(McpJsonValue json)
+        {
+            if (json == null) return null;
+            if (json.Kind == McpJsonValue.JsonKind.Object)
+            {
+                McpJsonValue id;
+                if (json.TryGet("objectId", out id) && id.Kind == McpJsonValue.JsonKind.String) return id.StringValue;
+                if (json.TryGet("object_id", out id) && id.Kind == McpJsonValue.JsonKind.String) return id.StringValue;
+                return null;
+            }
+            if (json.Kind != McpJsonValue.JsonKind.String) return null;
+            // Only treat a bare string as a handle when the registry recognises it. This keeps
+            // genuine string arguments working, including ones that look handle-like.
+            object probe;
+            return registry.TryResolve(json.StringValue, out probe) ? json.StringValue : null;
         }
 
         private McpJsonValue SerializeValue(object value, int depth, SerializationState state)
